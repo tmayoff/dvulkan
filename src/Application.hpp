@@ -7,6 +7,8 @@
 #include <optional>
 #include <vulkan/vulkan.hpp>
 
+const int MAX_FRAMES_IN_FLIGHT = 2;
+
 struct QueueFamilyIndices {
   std::optional<uint32_t> graphicsFamily;
   std::optional<uint32_t> presentFamily;
@@ -30,10 +32,22 @@ class Application {
   void Run();
 
  private:
+  static std::vector<uint8_t> ReadFile(const std::string &filename);
+
   void InitWindow();
   void InitVulkan();
   void MainLoop();
   void Cleanup();
+
+  // Swapchain
+  void RecreateSwapchain();
+  void CleanupSwapchain();
+  void CreateSwapchain();
+  void CreateImageViews();
+  void CreateRenderPass();
+  void CreateGraphicsPipeline();
+  void CreateFramebuffers();
+  void CreateCommandBuffers();
 
   bool IsDeviceSuitable(VkPhysicalDevice device);
   QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
@@ -45,8 +59,6 @@ class Application {
   VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilites);
 
   VkShaderModule CreateShaderModule(const std::vector<uint8_t> &code);
-
-  static std::vector<uint8_t> ReadFile(const std::string &filename);
 
   // Vulkan
   VkInstance instance = VK_NULL_HANDLE;
@@ -64,6 +76,19 @@ class Application {
   VkPipeline graphicsPipeline;
   VkRenderPass renderPass;
   VkPipelineLayout pipelineLayout;
+
+  std::vector<VkFramebuffer> swapchainFramebuffers;
+
+  VkCommandPool commandPool;
+  std::vector<VkCommandBuffer> commandBuffers;
+
+  size_t currentFrame = 0;
+  std::array<VkFence, MAX_FRAMES_IN_FLIGHT> inFlightFences;
+  std::vector<VkFence> imagesInFlight;
+  std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> imageAvailableSempaphores;
+  std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> renderFinishedSemaphores;
+
+  bool framebufferResized = false;
 
   // SDL
   SDL_Window *window = nullptr;
