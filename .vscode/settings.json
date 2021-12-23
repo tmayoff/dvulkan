@@ -6,6 +6,7 @@
 		"ostream": "cpp",
 		"stop_token": "cpp",
 		"typeinfo": "cpp",
-		"*.inc": "cpp"
+		"*.inc": "cpp",
+		"array": "cpp"
 	}
 }

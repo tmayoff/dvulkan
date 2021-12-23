@@ -44,6 +44,10 @@ class Application {
       const std::vector<VkPresentModeKHR> &availablePresentModes);
   VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilites);
 
+  VkShaderModule CreateShaderModule(const std::vector<uint8_t> &code);
+
+  static std::vector<uint8_t> ReadFile(const std::string &filename);
+
   // Vulkan
   VkInstance instance = VK_NULL_HANDLE;
   VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
@@ -56,6 +60,10 @@ class Application {
   VkExtent2D swapchainExtent;
   std::vector<VkImage> swapchainImages;
   std::vector<VkImageView> swapchainImageViews;
+
+  VkPipeline graphicsPipeline;
+  VkRenderPass renderPass;
+  VkPipelineLayout pipelineLayout;
 
   // SDL
   SDL_Window *window = nullptr;
