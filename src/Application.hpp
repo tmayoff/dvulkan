@@ -86,6 +86,8 @@ class Application {
       const std::vector<vk::PresentModeKHR> &availablePresentModes);
   vk::Extent2D ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilites);
 
+  uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
+
   vk::ShaderModule CreateShaderModule(const std::vector<uint8_t> &code);
 
   // Vulkan
@@ -111,6 +113,7 @@ class Application {
   std::vector<vk::CommandBuffer> commandBuffers;
 
   vk::Buffer vertexBuffer;
+  vk::DeviceMemory vertexBufferMemory;
 
   size_t currentFrame = 0;
   std::array<vk::Fence, MAX_FRAMES_IN_FLIGHT> inFlightFences;

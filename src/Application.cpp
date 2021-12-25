@@ -4,9 +4,13 @@
 #include <SDL2/SDL_vulkan.h>
 
 #include <array>
+#include <cstddef>
 #include <fstream>
 #include <iostream>
 #include <set>
+#include <stdexcept>
+#include <vulkan/vulkan_enums.hpp>
+#include <vulkan/vulkan_structs.hpp>
 
 #include "Assert.hpp"
 
@@ -80,7 +84,8 @@ void Application::InitVulkan() {
       queueCreateInfos.push_back(queueCreateInfo);
     }
 
-    vk::DeviceCreateInfo createInfo({}, queueCreateInfos, {}, requiredDeviceExtensions);
+    vk::DeviceCreateInfo createInfo(vk::DeviceCreateFlags(), queueCreateInfos, {},
+                                    requiredDeviceExtensions, {});
     device = physicalDevice.createDevice(createInfo);
 
     graphicsQueue = device.getQueue(indices.graphicsFamily.value(), 0);
@@ -99,6 +104,17 @@ void Application::InitVulkan() {
                                     vk::BufferUsageFlagBits::eVertexBuffer,
                                     vk::SharingMode::eExclusive);
     vertexBuffer = device.createBuffer(bufferInfo);
+    vk::MemoryRequirements memRequirements = device.getBufferMemoryRequirements(vertexBuffer);
+
+    vk::MemoryAllocateInfo allocInfo(memRequirements.size,
+                                     FindMemoryType(memRequirements.memoryTypeBits,
+                                                    vk::MemoryPropertyFlagBits::eHostVisible |
+                                                        vk::MemoryPropertyFlagBits::eHostCoherent));
+    vertexBufferMemory = device.allocateMemory(allocInfo);
+    device.bindBufferMemory(vertexBuffer, vertexBufferMemory, 0);
+    void *data = device.mapMemory(vertexBufferMemory, 0, bufferInfo.size);
+    memcpy(data, vertices.data(), (size_t)bufferInfo.size);
+    device.unmapMemory(vertexBufferMemory);
   }
 
   CreateCommandBuffers();
@@ -136,8 +152,6 @@ void Application::MainLoop() {
            device.waitForFences(inFlightFences.at(currentFrame), VK_TRUE, UINT64_MAX))
       ;
 
-    device.resetFences((inFlightFences.at(currentFrame)));
-
     auto currentBuffer = device.acquireNextImageKHR(swapchain, UINT64_MAX,
                                                     imageAvailableSempaphores.at(currentFrame));
 
@@ -158,19 +172,19 @@ void Application::MainLoop() {
 
     imagesInFlight[imageIndex] = inFlightFences.at(currentFrame);
 
-    std::array<vk::Semaphore, 1> waitSemaphores = {imageAvailableSempaphores.at(currentFrame)};
+    std::array<vk::Semaphore, 1> signalSemaphores = {renderFinishedSemaphores.at(currentFrame)};
     std::array<vk::PipelineStageFlags, 1> waitStages = {
         vk::PipelineStageFlagBits::eColorAttachmentOutput};
 
-    std::array<vk::Semaphore, 1> signalSemaphores = {renderFinishedSemaphores.at(currentFrame)};
-    vk::SubmitInfo submitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores);
+    vk::SubmitInfo submitInfo(imageAvailableSempaphores.at(currentFrame), waitStages,
+                              commandBuffers, signalSemaphores);
 
     device.resetFences(inFlightFences.at(currentFrame));
 
     graphicsQueue.submit(submitInfo, inFlightFences.at(currentFrame));
 
     // Present
-    vk::PresentInfoKHR presentInfo(waitSemaphores, swapchain, imageIndex);
+    vk::PresentInfoKHR presentInfo(signalSemaphores, swapchain, imageIndex);
     vk::Result result = presentQueue.presentKHR(presentInfo);
 
     if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR ||
@@ -326,7 +340,7 @@ void Application::CreateGraphicsPipeline() {
                                                        vk::SampleCountFlagBits::e1, false);
 
   vk::PipelineColorBlendAttachmentState colorBlendAttachment(
-      false, vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eSrc1Alpha, vk::BlendOp::eAdd,
+      false, vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd,
       vk::BlendFactor::eOne, vk::BlendFactor::eZero, vk::BlendOp::eAdd);
 
   vk::PipelineColorBlendStateCreateInfo colorBlending(
@@ -340,10 +354,10 @@ void Application::CreateGraphicsPipeline() {
 
   pipelineLayout = device.createPipelineLayout(vk::PipelineLayoutCreateInfo());
 
-  vk::GraphicsPipelineCreateInfo pipelineInfo(
-      vk::PipelineCreateFlags(), shaderStages, &vertexInputInfo, &inputAssembly, nullptr,
-      &viewportState, &rasterizer, &multisampling, nullptr, &colorBlending, &dynamicState,
-      pipelineLayout, renderPass);
+  vk::GraphicsPipelineCreateInfo pipelineInfo(vk::PipelineCreateFlags(), shaderStages,
+                                              &vertexInputInfo, &inputAssembly, nullptr,
+                                              &viewportState, &rasterizer, &multisampling, nullptr,
+                                              &colorBlending, nullptr, pipelineLayout, renderPass);
 
   vk::Result result{};
   std::tie(result, graphicsPipeline) = device.createGraphicsPipeline(nullptr, pipelineInfo);
@@ -382,7 +396,10 @@ void Application::CreateCommandBuffers() {
     commandBuffers[i].begin(beginInfo);
     commandBuffers[i].beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
     commandBuffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
-    commandBuffers[i].draw(3, 1, 0, 0);
+
+    commandBuffers[i].bindVertexBuffers(0, vertexBuffer, {0});
+
+    commandBuffers[i].draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);
     commandBuffers[i].endRenderPass();
     commandBuffers[i].end();
   }
@@ -479,22 +496,35 @@ vk::Extent2D Application::ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR &cap
   return actualExtent;
 }
 
-vk::ShaderModule Application::CreateShaderModule(const std::vector<uint8_t> &code) {
-  std::vector<uint32_t> code_(code.begin(), code.end());
+uint32_t Application::FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
+  auto memProperties = physicalDevice.getMemoryProperties();
 
-  vk::ShaderModuleCreateInfo createInfo(vk::ShaderModuleCreateFlags(), code_);
+  for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+    if (typeFilter & (1 << i) && (memProperties.memoryTypes[i].propertyFlags & properties))
+      return i;
+  }
+
+  throw std::runtime_error("Failed to find suitable memory type");
+}
+
+vk::ShaderModule Application::CreateShaderModule(const std::vector<uint8_t> &code) {
+  vk::ShaderModuleCreateInfo createInfo(vk::ShaderModuleCreateFlags(), code.size(),
+                                        reinterpret_cast<const uint32_t *>(code.data()));
   return device.createShaderModule(createInfo);
 }
 
 std::vector<uint8_t> Application::ReadFile(const std::string &filename) {
-  std::ifstream file(filename, std::ios::ate | std::ios::binary);
+  std::ifstream file(filename, std::ios::in);
   if (!file.is_open()) throw std::runtime_error("failed to open file");
 
-  size_t filesize = (size_t)file.tellg();
-  std::vector<uint8_t> buf(filesize);
-  file.seekg(0);
-  file.read(reinterpret_cast<char *>(buf.data()), filesize);
+  file.seekg(0, std::ios::end);
+  size_t filesize = file.tellg();
+
+  std::vector<char> buf(filesize);
+  file.seekg(0, std::ios::beg);
+  file.read(buf.data(), filesize);
+
   file.close();
 
-  return buf;
+  return std::vector<uint8_t>(buf.begin(), buf.end());
 }
