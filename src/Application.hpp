@@ -45,9 +45,18 @@ struct Vertex {
   }
 };
 
-const std::vector<Vertex> vertices = {{{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 0.0f}},
-                                      {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 0.0f}},
-                                      {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 0.0f}}};
+struct UniformBufferObject {
+  glm::mat4 model;
+  glm::mat4 view;
+  glm::mat4 proj;
+};
+
+const std::vector<Vertex> vertices = {{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                                      {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
+                                      {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+                                      {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}}};
+
+const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0};
 
 class Application {
   const std::vector<const char *> requiredDeviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
@@ -90,6 +99,11 @@ class Application {
 
   vk::ShaderModule CreateShaderModule(const std::vector<uint8_t> &code);
 
+  std::pair<vk::Buffer, vk::DeviceMemory> CreateBuffer(vk::DeviceSize size,
+                                                       vk::BufferUsageFlags usage,
+                                                       vk::MemoryPropertyFlags properties);
+  void CopyBuffer(vk::Buffer src, vk::Buffer dst, vk::DeviceSize size);
+
   // Vulkan
   vk::Instance instance;
   vk::PhysicalDevice physicalDevice;
@@ -114,6 +128,8 @@ class Application {
 
   vk::Buffer vertexBuffer;
   vk::DeviceMemory vertexBufferMemory;
+  vk::Buffer indexBuffer;
+  vk::DeviceMemory indexBufferMemory;
 
   size_t currentFrame = 0;
   std::array<vk::Fence, MAX_FRAMES_IN_FLIGHT> inFlightFences;

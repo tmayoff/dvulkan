@@ -5,6 +5,8 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -99,22 +101,49 @@ void Application::InitVulkan() {
   CreateFramebuffers();
 
   {
-    // Create Vertex Buffer
-    vk::BufferCreateInfo bufferInfo({}, sizeof(Vertex) * vertices.size(),
-                                    vk::BufferUsageFlagBits::eVertexBuffer,
-                                    vk::SharingMode::eExclusive);
-    vertexBuffer = device.createBuffer(bufferInfo);
-    vk::MemoryRequirements memRequirements = device.getBufferMemoryRequirements(vertexBuffer);
+    // Create Command Pool
+    QueueFamilyIndices queueIndices = FindQueueFamilies(physicalDevice);
+    vk::CommandPoolCreateInfo poolInfo(vk::CommandPoolCreateFlags(),
+                                       queueIndices.graphicsFamily.value());
+    commandPool = device.createCommandPool(poolInfo);
+  }
 
-    vk::MemoryAllocateInfo allocInfo(memRequirements.size,
-                                     FindMemoryType(memRequirements.memoryTypeBits,
-                                                    vk::MemoryPropertyFlagBits::eHostVisible |
-                                                        vk::MemoryPropertyFlagBits::eHostCoherent));
-    vertexBufferMemory = device.allocateMemory(allocInfo);
-    device.bindBufferMemory(vertexBuffer, vertexBufferMemory, 0);
-    void *data = device.mapMemory(vertexBufferMemory, 0, bufferInfo.size);
-    memcpy(data, vertices.data(), (size_t)bufferInfo.size);
-    device.unmapMemory(vertexBufferMemory);
+  {
+    // Create Vertex Buffer
+    vk::DeviceSize bufSize = sizeof(Vertex) * vertices.size();
+
+    auto [stagingBuf, stagingMem] = CreateBuffer(
+        bufSize, vk::BufferUsageFlagBits::eTransferSrc,
+        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+    uint8_t *data = static_cast<uint8_t *>(device.mapMemory(stagingMem, 0, bufSize));
+    memcpy(data, vertices.data(), sizeof(Vertex) * vertices.size());
+    device.unmapMemory(stagingMem);
+
+    std::tie(vertexBuffer, vertexBufferMemory) = CreateBuffer(
+        bufSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
+        vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    CopyBuffer(stagingBuf, vertexBuffer, bufSize);
+  }
+
+  {
+    // Index buffer
+    vk::DeviceSize bufSize = sizeof(indices[0]) * indices.size();
+
+    auto [stagingBuf, stagingMem] = CreateBuffer(
+        bufSize, vk::BufferUsageFlagBits::eTransferSrc,
+        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+    void *data = device.mapMemory(stagingMem, 0, bufSize);
+    memcpy(data, indices.data(), bufSize);
+    device.unmapMemory(stagingMem);
+
+    std::tie(indexBuffer, indexBufferMemory) = CreateBuffer(
+        bufSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
+        vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    CopyBuffer(stagingBuf, indexBuffer, bufSize);
   }
 
   CreateCommandBuffers();
@@ -337,11 +366,14 @@ void Application::CreateGraphicsPipeline() {
       vk::CullModeFlagBits::eBack, vk::FrontFace::eClockwise, false, 0.0f, 0.0f, 0.0f, 1.0f);
 
   vk::PipelineMultisampleStateCreateInfo multisampling(vk::PipelineMultisampleStateCreateFlags(),
-                                                       vk::SampleCountFlagBits::e1, false);
+                                                       vk::SampleCountFlagBits::e1, false, 1.0f,
+                                                       nullptr, false, false);
 
   vk::PipelineColorBlendAttachmentState colorBlendAttachment(
-      false, vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd,
-      vk::BlendFactor::eOne, vk::BlendFactor::eZero, vk::BlendOp::eAdd);
+      false, vk::BlendFactor::eOne, vk::BlendFactor::eZero, vk::BlendOp::eAdd,
+      vk::BlendFactor::eOne, vk::BlendFactor::eZero, vk::BlendOp::eAdd,
+      vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+          vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
 
   vk::PipelineColorBlendStateCreateInfo colorBlending(
       vk::PipelineColorBlendStateCreateFlags(), false, vk::LogicOp::eNoOp, colorBlendAttachment);
@@ -375,11 +407,6 @@ void Application::CreateFramebuffers() {
 }
 
 void Application::CreateCommandBuffers() {
-  // Create command pool
-  QueueFamilyIndices indices = FindQueueFamilies(physicalDevice);
-  vk::CommandPoolCreateInfo poolInfo(vk::CommandPoolCreateFlags(), indices.graphicsFamily.value());
-  commandPool = device.createCommandPool(poolInfo);
-
   // Create Command Buffers
   vk::CommandBufferAllocateInfo allocInfo(commandPool, vk::CommandBufferLevel::ePrimary,
                                           swapchainFramebuffers.size());
@@ -398,8 +425,9 @@ void Application::CreateCommandBuffers() {
     commandBuffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
 
     commandBuffers[i].bindVertexBuffers(0, vertexBuffer, {0});
+    commandBuffers[i].bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint16);
 
-    commandBuffers[i].draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+    commandBuffers[i].drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
     commandBuffers[i].endRenderPass();
     commandBuffers[i].end();
   }
@@ -511,6 +539,40 @@ vk::ShaderModule Application::CreateShaderModule(const std::vector<uint8_t> &cod
   vk::ShaderModuleCreateInfo createInfo(vk::ShaderModuleCreateFlags(), code.size(),
                                         reinterpret_cast<const uint32_t *>(code.data()));
   return device.createShaderModule(createInfo);
+}
+
+std::pair<vk::Buffer, vk::DeviceMemory> Application::CreateBuffer(
+    vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties) {
+  vk::BufferCreateInfo bufferInfo(vk::BufferCreateFlags(), size, usage,
+                                  vk::SharingMode::eExclusive);
+  auto buf = device.createBuffer(bufferInfo);
+
+  vk::MemoryRequirements memReqs = device.getBufferMemoryRequirements(buf);
+  vk::MemoryAllocateInfo allocInfo(memReqs.size,
+                                   FindMemoryType(memReqs.memoryTypeBits, properties));
+  auto mem = device.allocateMemory(allocInfo);
+
+  device.bindBufferMemory(buf, mem, 0);
+
+  return {buf, mem};
+}
+
+void Application::CopyBuffer(vk::Buffer src, vk::Buffer dst, vk::DeviceSize size) {
+  vk::CommandBufferAllocateInfo allocInfo(commandPool, vk::CommandBufferLevel::ePrimary, 1);
+
+  std::vector<vk::CommandBuffer> buf = device.allocateCommandBuffers(allocInfo);
+
+  vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+  buf[0].begin(beginInfo);
+
+  vk::BufferCopy copyRegion(0, 0, size);
+  buf[0].copyBuffer(src, dst, copyRegion);
+
+  buf[0].end();
+
+  vk::SubmitInfo submitInfo(0, {}, {}, 1, buf.data(), 0, {});
+  graphicsQueue.submit(submitInfo);
+  graphicsQueue.waitIdle();
 }
 
 std::vector<uint8_t> Application::ReadFile(const std::string &filename) {
