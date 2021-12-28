@@ -4,6 +4,7 @@
 #include <SDL2/SDL_vulkan.h>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -12,9 +13,12 @@
 #include <set>
 #include <stdexcept>
 #include <vulkan/vulkan_enums.hpp>
+#include <vulkan/vulkan_handles.hpp>
 #include <vulkan/vulkan_structs.hpp>
 
 #include "Assert.hpp"
+#include "glm/ext/matrix_clip_space.hpp"
+#include "glm/ext/matrix_transform.hpp"
 
 void Application::Run() {
   InitWindow();
@@ -32,25 +36,9 @@ void Application::InitWindow() {
 }
 
 void Application::InitVulkan() {
-  {
-    // Extensions
-    uint32_t extensionCount = 0;
-    SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, nullptr);
-    std::vector<const char *> extensions(extensionCount);
-    SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, extensions.data());
+  CreateInstance();
 
-    // Layers
-    const std::array<const char *, 1> layers = {"VK_LAYER_KHRONOS_validation"};
-
-    // Create Instance
-    vk::ApplicationInfo appInfo("dvulkan", 1, "dvulkan", 1, VK_API_VERSION_1_2);
-    vk::InstanceCreateInfo createInfo({}, &appInfo, layers, extensions);
-    instance = vk::createInstance(createInfo);
-  }
-
-  {
-      // Setup Debugging
-  }
+  // TODO Setup Debugging
 
   {
     // Surface creation
@@ -97,6 +85,7 @@ void Application::InitVulkan() {
   CreateSwapchain();
   CreateImageViews();
   CreateRenderPass();
+  CreateDescriptorSetLayout();
   CreateGraphicsPipeline();
   CreateFramebuffers();
 
@@ -146,6 +135,10 @@ void Application::InitVulkan() {
     CopyBuffer(stagingBuf, indexBuffer, bufSize);
   }
 
+  CreateUniformBuffers();
+  CreateDescriptorPool();
+  CreateDescriptorSets();
+
   CreateCommandBuffers();
 
   {
@@ -194,6 +187,8 @@ void Application::MainLoop() {
 
     uint32_t imageIndex = currentBuffer.value;
 
+    UpdateUniformBuffers(imageIndex);
+
     if (imagesInFlight.at(imageIndex))
       while (vk::Result::eTimeout ==
              device.waitForFences(imagesInFlight.at(imageIndex), true, UINT64_MAX))
@@ -230,7 +225,43 @@ void Application::MainLoop() {
   device.waitIdle();
 }
 
+void Application::UpdateUniformBuffers(uint32_t currentImage) {
+  static auto startTime = std::chrono::high_resolution_clock::now();
+
+  auto currentTime = std::chrono::high_resolution_clock::now();
+  float time =
+      std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+  UniformBufferObject ubo{};
+  ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+  ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+  ubo.proj =
+      glm::perspective(glm::radians(45.0f),
+                       (float)swapchainExtent.width / (float)swapchainExtent.height, 0.1f, 1000.0f);
+  ubo.proj[1][1] *= -1;
+
+  void *data = device.mapMemory(uniformBuffersMemory[currentImage], 0, sizeof(ubo));
+  memcpy(data, &ubo, sizeof(ubo));
+  device.unmapMemory(uniformBuffersMemory[currentImage]);
+}
+
 void Application::Cleanup() { SDL_Quit(); }
+
+void Application::CreateInstance() {
+  // Extensions
+  uint32_t extensionCount = 0;
+  SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, nullptr);
+  std::vector<const char *> extensions(extensionCount);
+  SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, extensions.data());
+
+  // Layers
+  const std::array<const char *, 1> layers = {"VK_LAYER_KHRONOS_validation"};
+
+  // Create Instance
+  vk::ApplicationInfo appInfo("dvulkan", 1, "dvulkan", 1, VK_API_VERSION_1_2);
+  vk::InstanceCreateInfo createInfo({}, &appInfo, layers, extensions);
+  instance = vk::createInstance(createInfo);
+}
 
 void Application::RecreateSwapchain() {
   vkDeviceWaitIdle(device);
@@ -242,6 +273,8 @@ void Application::RecreateSwapchain() {
   CreateRenderPass();
   CreateGraphicsPipeline();
   CreateFramebuffers();
+  CreateUniformBuffers();
+  CreateDescriptorPool();
   CreateCommandBuffers();
 }
 
@@ -329,6 +362,30 @@ void Application::CreateRenderPass() {
   renderPass = device.createRenderPass(createInfo);
 }
 
+void Application::CreateDescriptorSetLayout() {
+  vk::DescriptorSetLayoutBinding uboLayoutBinding(0, vk::DescriptorType::eUniformBuffer, 1,
+                                                  vk::ShaderStageFlagBits::eVertex);
+
+  vk::DescriptorSetLayoutCreateInfo layoutInfo(vk::DescriptorSetLayoutCreateFlags(),
+                                               uboLayoutBinding);
+  descriptorSetLayout = device.createDescriptorSetLayout(layoutInfo);
+}
+
+void Application::CreateDescriptorSets() {
+  std::vector<vk::DescriptorSetLayout> layouts(swapchainImages.size(), descriptorSetLayout);
+  vk::DescriptorSetAllocateInfo allocInfo(descriptorPool, layouts);
+  descriptorSets = device.allocateDescriptorSets(allocInfo);
+
+  for (size_t i = 0; i < swapchainImages.size(); i++) {
+    vk::DescriptorBufferInfo bufInfo(uniformBuffers[i], 0, sizeof(UniformBufferObject));
+
+    vk::WriteDescriptorSet descriptorWrite(
+        descriptorSets[i], 0, 0, vk::DescriptorType::eUniformBuffer, nullptr, bufInfo, nullptr);
+
+    device.updateDescriptorSets(descriptorWrite, {});
+  }
+}
+
 void Application::CreateGraphicsPipeline() {
   auto vertShaderCode = ReadFile("assets/vert.spv");
   auto fragShaderCode = ReadFile("assets/frag.spv");
@@ -363,7 +420,7 @@ void Application::CreateGraphicsPipeline() {
 
   vk::PipelineRasterizationStateCreateInfo rasterizer(
       vk::PipelineRasterizationStateCreateFlags(), false, false, vk::PolygonMode::eFill,
-      vk::CullModeFlagBits::eBack, vk::FrontFace::eClockwise, false, 0.0f, 0.0f, 0.0f, 1.0f);
+      vk::CullModeFlagBits::eBack, vk::FrontFace::eCounterClockwise, false, 0.0f, 0.0f, 0.0f, 1.0f);
 
   vk::PipelineMultisampleStateCreateInfo multisampling(vk::PipelineMultisampleStateCreateFlags(),
                                                        vk::SampleCountFlagBits::e1, false, 1.0f,
@@ -384,7 +441,9 @@ void Application::CreateGraphicsPipeline() {
   vk::PipelineDynamicStateCreateInfo dynamicState(vk::PipelineDynamicStateCreateFlags(),
                                                   dynamicStates);
 
-  pipelineLayout = device.createPipelineLayout(vk::PipelineLayoutCreateInfo());
+  vk::PipelineLayoutCreateInfo pipelineLayoutInfo(vk::PipelineLayoutCreateFlags(),
+                                                  descriptorSetLayout);
+  pipelineLayout = device.createPipelineLayout(pipelineLayoutInfo);
 
   vk::GraphicsPipelineCreateInfo pipelineInfo(vk::PipelineCreateFlags(), shaderStages,
                                               &vertexInputInfo, &inputAssembly, nullptr,
@@ -404,6 +463,28 @@ void Application::CreateFramebuffers() {
                                      swapchainExtent.width, swapchainExtent.height, 1);
     swapchainFramebuffers[i] = device.createFramebuffer(fbInfo);
   }
+}
+
+void Application::CreateUniformBuffers() {
+  vk::DeviceSize bufSize = sizeof(UniformBufferObject);
+
+  uniformBuffers.resize(swapchainImages.size());
+  uniformBuffersMemory.resize(swapchainImages.size());
+
+  for (size_t i = 0; i < swapchainImages.size(); i++) {
+    std::tie(uniformBuffers[i], uniformBuffersMemory[i]) = CreateBuffer(
+        bufSize, vk::BufferUsageFlagBits::eUniformBuffer,
+        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+  }
+}
+
+void Application::CreateDescriptorPool() {
+  vk::DescriptorPoolSize poolSize(vk::DescriptorType::eUniformBuffer,
+                                  static_cast<uint32_t>(swapchainImages.size()));
+
+  vk::DescriptorPoolCreateInfo poolInfo(vk::DescriptorPoolCreateFlags(),
+                                        static_cast<uint32_t>(swapchainImages.size()), poolSize);
+  descriptorPool = device.createDescriptorPool(poolInfo);
 }
 
 void Application::CreateCommandBuffers() {
@@ -427,6 +508,8 @@ void Application::CreateCommandBuffers() {
     commandBuffers[i].bindVertexBuffers(0, vertexBuffer, {0});
     commandBuffers[i].bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint16);
 
+    commandBuffers[i].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0,
+                                         descriptorSets[i], {});
     commandBuffers[i].drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
     commandBuffers[i].endRenderPass();
     commandBuffers[i].end();

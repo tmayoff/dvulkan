@@ -4,7 +4,9 @@
 
 #include <SDL2/SDL.h>
 
+#define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <optional>
 #include <vulkan/vulkan.hpp>
 
@@ -21,6 +23,12 @@ struct SwapchainSupportDetails {
   vk::SurfaceCapabilitiesKHR capabilites;
   std::vector<vk::SurfaceFormatKHR> formats;
   std::vector<vk::PresentModeKHR> presentModes;
+};
+
+struct UniformBufferObject {
+  glm::mat4 model;
+  glm::mat4 view;
+  glm::mat4 proj;
 };
 
 struct Vertex {
@@ -45,12 +53,6 @@ struct Vertex {
   }
 };
 
-struct UniformBufferObject {
-  glm::mat4 model;
-  glm::mat4 view;
-  glm::mat4 proj;
-};
-
 const std::vector<Vertex> vertices = {{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
                                       {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
                                       {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
@@ -73,16 +75,24 @@ class Application {
   void InitWindow();
   void InitVulkan();
   void MainLoop();
+
+  void UpdateUniformBuffers(uint32_t currentImage);
+
   void Cleanup();
 
-  // Swapchain
+  void CreateInstance();
+  // void SetupDebugMessenger();
   void RecreateSwapchain();
   void CleanupSwapchain();
   void CreateSwapchain();
   void CreateImageViews();
   void CreateRenderPass();
+  void CreateDescriptorSetLayout();
   void CreateGraphicsPipeline();
   void CreateFramebuffers();
+  void CreateUniformBuffers();
+  void CreateDescriptorPool();
+  void CreateDescriptorSets();
   void CreateCommandBuffers();
 
   bool IsDeviceSuitable(const vk::PhysicalDevice &device);
@@ -119,6 +129,9 @@ class Application {
 
   vk::Pipeline graphicsPipeline;
   vk::RenderPass renderPass;
+  vk::DescriptorPool descriptorPool;
+  std::vector<vk::DescriptorSet> descriptorSets;
+  vk::DescriptorSetLayout descriptorSetLayout;
   vk::PipelineLayout pipelineLayout;
 
   std::vector<vk::Framebuffer> swapchainFramebuffers;
@@ -130,6 +143,9 @@ class Application {
   vk::DeviceMemory vertexBufferMemory;
   vk::Buffer indexBuffer;
   vk::DeviceMemory indexBufferMemory;
+
+  std::vector<vk::Buffer> uniformBuffers;
+  std::vector<vk::DeviceMemory> uniformBuffersMemory;
 
   size_t currentFrame = 0;
   std::array<vk::Fence, MAX_FRAMES_IN_FLIGHT> inFlightFences;
