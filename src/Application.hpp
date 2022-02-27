@@ -16,7 +16,9 @@ struct QueueFamilyIndices {
   std::optional<uint32_t> graphicsFamily;
   std::optional<uint32_t> presentFamily;
 
-  bool IsComplete() { return graphicsFamily.has_value() && presentFamily.has_value(); }
+  [[nodiscard]] auto IsComplete() const -> bool {
+    return graphicsFamily.has_value() && presentFamily.has_value();
+  }
 };
 
 struct SwapchainSupportDetails {
@@ -32,16 +34,16 @@ struct UniformBufferObject {
 };
 
 struct Vertex {
-  glm::vec3 Position = glm::vec3(0.0f);
-  glm::vec4 Color = glm::vec4(1.0f);
+  glm::vec3 Position = glm::vec3(0.0F);
+  glm::vec4 Color = glm::vec4(1.0F);
 
-  static vk::VertexInputBindingDescription GetBindingDescription() {
+  static auto GetBindingDescription() -> vk::VertexInputBindingDescription {
     vk::VertexInputBindingDescription bindingDescription(0, sizeof(Vertex),
                                                          vk::VertexInputRate::eVertex);
     return bindingDescription;
   }
 
-  static std::array<vk::VertexInputAttributeDescription, 2> GetAttributeDescriptions() {
+  static auto GetAttributeDescriptions() -> std::array<vk::VertexInputAttributeDescription, 2> {
     std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions{};
 
     attributeDescriptions[0] = vk::VertexInputAttributeDescription(
@@ -53,10 +55,10 @@ struct Vertex {
   }
 };
 
-const std::vector<Vertex> vertices = {{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                                      {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-                                      {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-                                      {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}}};
+const std::vector<Vertex> vertices = {{{-0.5F, -0.5F, 0.0F}, {1.0F, 0.0F, 0.0F, 1.0F}},
+                                      {{0.5F, -0.5F, 0.0F}, {0.0F, 1.0F, 0.0F, 1.0F}},
+                                      {{0.5F, 0.5F, 0.0F}, {0.0F, 0.0F, 1.0F, 1.0F}},
+                                      {{-0.5F, 0.5F, 0.0F}, {1.0F, 1.0F, 1.0F, 1.0F}}};
 
 const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0};
 
@@ -70,7 +72,7 @@ class Application {
   void Run();
 
  private:
-  static std::vector<uint8_t> ReadFile(const std::string &filename);
+  static auto ReadFile(const std::string &filename) -> std::vector<uint8_t>;
 
   void InitWindow();
   void InitVulkan();
@@ -95,23 +97,22 @@ class Application {
   void CreateDescriptorSets();
   void CreateCommandBuffers();
 
-  bool IsDeviceSuitable(const vk::PhysicalDevice &device);
-  QueueFamilyIndices FindQueueFamilies(const vk::PhysicalDevice &device);
-  bool CheckExtensionSupport(const vk::PhysicalDevice &device);
-  SwapchainSupportDetails QuerySwapchainSupportDetails(const vk::PhysicalDevice &device);
-  vk::SurfaceFormatKHR ChooseSwapchainFormat(
-      const std::vector<vk::SurfaceFormatKHR> &availableFormats);
-  vk::PresentModeKHR ChooseSwapchainPresentMode(
-      const std::vector<vk::PresentModeKHR> &availablePresentModes);
-  vk::Extent2D ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilites);
+  auto IsDeviceSuitable(const vk::PhysicalDevice &device) -> bool;
+  auto FindQueueFamilies(const vk::PhysicalDevice &device) -> QueueFamilyIndices;
+  auto CheckExtensionSupport(const vk::PhysicalDevice &device) -> bool;
+  auto QuerySwapchainSupportDetails(const vk::PhysicalDevice &device) -> SwapchainSupportDetails;
+  auto ChooseSwapchainFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats)
+      -> vk::SurfaceFormatKHR;
+  auto ChooseSwapchainPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes)
+      -> vk::PresentModeKHR;
+  auto ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilites) -> vk::Extent2D;
 
-  uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
+  auto FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) -> uint32_t;
 
-  vk::ShaderModule CreateShaderModule(const std::vector<uint8_t> &code);
+  auto CreateShaderModule(const std::vector<uint8_t> &code) -> vk::ShaderModule;
 
-  std::pair<vk::Buffer, vk::DeviceMemory> CreateBuffer(vk::DeviceSize size,
-                                                       vk::BufferUsageFlags usage,
-                                                       vk::MemoryPropertyFlags properties);
+  auto CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage,
+                    vk::MemoryPropertyFlags properties) -> std::pair<vk::Buffer, vk::DeviceMemory>;
   void CopyBuffer(vk::Buffer src, vk::Buffer dst, vk::DeviceSize size);
 
   // Vulkan
